@@ -686,6 +686,21 @@
   }
 
   /* Map picker modal */
+
+  /* ===== セブン予定表 ===== */
+  .sv-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:3000;display:none;align-items:center;justify-content:center;padding:12px}
+  .sv-ov.on{display:flex}
+  .sv-box{background:#fff;color:#1a1a1a;width:100%;max-width:720px;max-height:92vh;overflow:auto;border-radius:14px;padding:18px}
+  .sv-box h3{margin:0 0 12px;font-size:18px}
+  .sv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+  .sv-grid label{display:block;font-size:12px;font-weight:700;margin-bottom:3px;color:#555}
+  .sv-grid input{width:100%;padding:9px;border:1px solid #ccc;border-radius:8px;font-size:15px;box-sizing:border-box}
+  .sv-tbl{width:100%;border-collapse:collapse;font-size:14px;margin:6px 0 12px}
+  .sv-tbl th,.sv-tbl td{border-bottom:1px solid #e5e5e5;padding:6px;text-align:left}
+  .sv-tbl th{font-size:12px;color:#666}
+  .sv-tbl input{padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;width:100%;box-sizing:border-box}
+  .sv-foot{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+  .sv-note{font-size:12px;color:#777;margin:0 0 10px}
   .picker-overlay {
     position: fixed; inset: 0;
     background: rgba(20,22,28,0.7);
@@ -1033,6 +1048,7 @@
           <a class="btn btn-accent" id="btnOpenGoogle" href="#" target="_blank" rel="noopener">📍 Google Maps</a>
           <button class="btn btn-secondary" id="btnExportPDF">📄 PDF出力</button>
           <button class="btn btn-secondary" id="btnExport">📥 CSV</button>
+          <button class="btn btn-accent" id="btnSevenXlsx">🏪 セブン予定表Excel</button>
         </div>
         <div id="chunkLinks" style="display:none;"></div>
         <div class="custom-range hidden" id="customRangeBox">
@@ -2734,6 +2750,109 @@ $("pickerSearchInput").addEventListener("keydown", (e) => {
 updatePrefectureFilter();
 renderStoreList();
 resetResults();
+</script>
+
+<div class="sv-ov" id="svOv">
+  <div class="sv-box">
+    <h3>🏪 セブンイレブン 巡回ルート予定表</h3>
+    <p class="sv-note">今の巡回順で予定表を作ります。日付・時間は下の表で個別に直せます。</p>
+    <div class="sv-grid">
+      <div><label>開始日</label><input type="date" id="svStart"></div>
+      <div><label>1日の件数</label><input type="number" id="svPerDay" min="1" max="20" value="4"></div>
+      <div><label>来店時間（カンマ区切り）</label><input id="svTimes" value="09:00,10:30,13:00,15:00"></div>
+      <div><label>担当者</label><input id="svStaff" placeholder="名前"></div>
+      <div><label><input type="checkbox" id="svSkipWeekend" checked style="width:auto"> 土日を飛ばす</label></div>
+    </div>
+    <button class="btn btn-secondary" id="svApply" style="margin-bottom:8px">↻ この条件で日付・時間を割り振る</button>
+    <table class="sv-tbl"><thead><tr><th style="width:40px">順番</th><th>店舗名</th><th style="width:150px">訪問予定日</th><th style="width:44px">曜日</th><th style="width:100px">来店時間</th></tr></thead><tbody id="svBody"></tbody></table>
+    <div class="sv-foot">
+      <button class="btn btn-secondary" id="svClose">閉じる</button>
+      <button class="btn btn-accent" id="svDownload">📥 Excelを作成</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== セブンイレブン 巡回ルート予定表（Excel） ===== */
+(function(){
+  const W = "日月火水木金土";
+  const g = (id) => document.getElementById(id);
+  let rows = [];
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymd = (d) => `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())}`;
+  const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const storeName = (n) => { n = String(n || "").trim(); return /店$/.test(n) ? n : n + "店"; };
+  function nextMonday() { const d = new Date(); d.setHours(0,0,0,0); const k = (8 - d.getDay()) % 7 || 7; d.setDate(d.getDate() + k); return d; }
+  function lsGet(k){ try { return localStorage.getItem(k); } catch(e) { return null; } }
+  function lsSet(k,v){ try { localStorage.setItem(k,v); } catch(e) {} }
+
+  function assign() {
+    const order = (state.optimizedOrder || []);
+    const per = Math.max(1, parseInt(g("svPerDay").value) || 4);
+    const times = g("svTimes").value.split(/[,、\s]+/).filter(Boolean);
+    const skip = g("svSkipWeekend").checked;
+    let d = new Date((g("svStart").value || iso(nextMonday())) + "T00:00");
+    const fixDay = () => { if (skip) while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1); };
+    fixDay();
+    rows = order.map((idx, i) => {
+      if (i > 0 && i % per === 0) { d.setDate(d.getDate() + 1); fixDay(); }
+      return { name: storeName(state.stores[idx].name), date: iso(d), time: times[i % per] || "" };
+    });
+    render();
+  }
+  function render() {
+    g("svBody").innerHTML = rows.map((r, i) => {
+      const w = r.date ? W[new Date(r.date + "T00:00").getDay()] : "";
+      return `<tr><td>${i+1}</td><td><input data-i="${i}" data-k="name" value="${escapeHTML(r.name)}"></td>
+        <td><input type="date" data-i="${i}" data-k="date" value="${r.date}"></td><td>${w}</td>
+        <td><input data-i="${i}" data-k="time" value="${escapeHTML(r.time)}"></td></tr>`;
+    }).join("");
+  }
+  g("svBody").addEventListener("change", (e) => {
+    const t = e.target; if (!t.dataset.k) return;
+    rows[+t.dataset.i][t.dataset.k] = t.value;
+    if (t.dataset.k === "date") render();
+  });
+
+  function download() {
+    if (!rows.length) { toast("店舗がありません", true); return; }
+    lsSet("sv_staff", g("svStaff").value); lsSet("sv_times", g("svTimes").value); lsSet("sv_perday", g("svPerDay").value);
+    const today = new Date();
+    const first = new Date(rows[0].date + "T00:00");
+    const aoa = [
+      ["セブンイレブン 店舗メンテナンス巡回ルート予定表", null, null, null, null],
+      ["作成日: " + ymd(today), null, "担当者: " + (g("svStaff").value || ""), null, null],
+      [],
+      ["順番", "店舗名", "訪問予定日", "曜日", "来店時間"],
+      ...rows.map((r, i) => {
+        const dt = r.date ? new Date(r.date + "T00:00") : null;
+        return [i + 1, r.name, dt ? ymd(dt) : "", dt ? W[dt.getDay()] : "", r.time];
+      })
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
+    ws["!cols"] = [{ wch: 7 }, { wch: 22 }, { wch: 15 }, { wch: 7 }, { wch: 11 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `${first.getMonth() + 1}月予定`);
+    const fname = `セブン巡回予定_${first.getFullYear()}年${first.getMonth() + 1}月_${iso(first).slice(5).replace("-", "")}〜.xlsx`;
+    XLSX.writeFile(wb, fname);
+    toast("Excelを作成しました");
+  }
+
+  g("btnSevenXlsx").addEventListener("click", () => {
+    if (!state.optimizedOrder || !state.optimizedOrder.length) { toast("先にルートを計算してください", true); return; }
+    if (!g("svStart").value) g("svStart").value = iso(nextMonday());
+    g("svStaff").value = lsGet("sv_staff") || g("svStaff").value;
+    g("svTimes").value = lsGet("sv_times") || g("svTimes").value;
+    g("svPerDay").value = lsGet("sv_perday") || g("svPerDay").value;
+    assign();
+    g("svOv").classList.add("on");
+  });
+  g("svApply").addEventListener("click", assign);
+  g("svClose").addEventListener("click", () => g("svOv").classList.remove("on"));
+  g("svOv").addEventListener("click", (e) => { if (e.target.id === "svOv") g("svOv").classList.remove("on"); });
+  g("svDownload").addEventListener("click", download);
+})();
 </script>
 </body>
 </html>
