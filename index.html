@@ -2834,7 +2834,7 @@ resetResults();
     ws["!cols"] = [{ wch: 7 }, { wch: 22 }, { wch: 15 }, { wch: 7 }, { wch: 11 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `${first.getMonth() + 1}月予定`);
-    const fname = `セブン巡回予定_${first.getFullYear()}年${first.getMonth() + 1}月_${iso(first).slice(5).replace("-", "")}〜.xlsx`;
+    const fname = `セブン${first.getMonth() + 1}月予定.xlsx`;
     XLSX.writeFile(wb, fname);
     toast("Excelを作成しました");
   }
